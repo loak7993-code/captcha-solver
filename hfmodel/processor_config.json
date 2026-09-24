@@ -1,0 +1,7 @@
+{
+  "processor_class": "CaptchaProcessor",
+  "vocab": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+  "auto_map": {
+    "AutoProcessor": "processing_captcha.CaptchaProcessor"
+  }
+}

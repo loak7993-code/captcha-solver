@@ -1,0 +1,8 @@
+# core
+torch>=2.4
+numpy
+pillow
+
+# image-grid solver (CLIP via ONNX Runtime — avoids the torchvision dependency)
+onnxruntime
+tokenizers

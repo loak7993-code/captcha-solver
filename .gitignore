@@ -1,0 +1,17 @@
+# model weights and datasets are downloaded/generated, not committed
+*.pt
+*.pth
+hfmodel/model.safetensors
+models/
+data/
+gridtest/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# logs
+*.log
+campaign.log
