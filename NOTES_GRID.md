@@ -85,7 +85,56 @@ zero-shot, and the gap is mostly recovered recall (missed positives):
 `solve_grid` auto-selects the head whenever the target is in its class list,
 falling back to zero-shot otherwise. Train it with `python3 grid_head.py 240`.
 
+## Field test: adversarial confusables (open item)
+
+A field test on a real WAF grid found the discriminative zero-shot path is exact
+for clear targets but inverts on a confusable pair. Reproduced and investigated:
+
+| target | selection | verdict |
+|---|---|---|
+| `clock` | tiles 4, 5 | ✅ exact |
+| `hat` | tile 6 | ✅ exact |
+| `suitcase` | tile 7 | ✅ exact |
+| `bucket` | tiles 0, 1, 2, 3, 8 | ⚠ selects buckets **and** bucket-shaped planters |
+| `pot` | (none above threshold) | ⚠ |
+
+Two cheap fixes were tested and **both fail** — which is the useful result:
+
+1. **Prompt disambiguation** (`prompt_override`), giving each class
+   distinguishing attributes — `bucket` → "a metal bucket / a galvanised bucket /
+   a red plastic bucket / a pail", `pot` → "a flower pot / a terracotta pot / a
+   planter with soil". Bucket still selects the same 5 tiles; pot then selects
+   *nothing*. No improvement.
+
+2. **A bigger backbone.** Swapped CLIP ViT-B/32 for **ViT-L/14** (int8 ONNX,
+   415 MB). Same selection on every target — and on `bucket` the confidences got
+   *higher* (0.94–1.00 vs 0.79–0.99). More capacity did not separate the pair;
+   it made the existing judgement more confident.
+
+**Conclusion.** The pair is not separable by prompting or by model scale. These
+tiles are all cylindrical metal/plastic containers — "bucket" vs "pot" is a label
+distinction the image alone does not carry at this granularity. The fix is
+**domain adaptation**: label a few hundred tiles of the actual target corpus and
+retrain the head on their CLIP features (the head is a small MLP, so this is
+minutes of work *once the labels exist*).
+
+That is blocked on data: there is one WAF grid (9 tiles) available locally and no
+ground truth, which is neither enough to train nor enough to *measure* an
+off-by-one. Needed before the loop can run:
+
+- a corpus of challenges from the target (a WAF-protected endpoint you control,
+  fetched at volume), and
+- a label oracle — for AWS WAF the service's own validate endpoint is the clean
+  one, exactly as `cern_solver.py live` uses `captcha.web.cern.ch` to confirm
+  every answer.
+
+The machinery is straightforward once those exist: `fetch → tile → label via
+oracle → CLIP features → retrain grid_head → re-measure`, and
+`prompt_override` (already in `solve_grid`) covers the cases where prompting *is*
+enough.
+
 ## Usage
+
 
 ```python
 from solve_grid import solve_grid, solve_grid_with_attempts
