@@ -1,3 +1,17 @@
+<p align="center">
+  <img src="assets/banner.svg" alt="CAPTCHA Solver" width="100%">
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776ab?logo=python&logoColor=white" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/PyTorch-2.x-ee4c2c?logo=pytorch&logoColor=white" alt="PyTorch">
+  <img src="https://img.shields.io/badge/CPU--only-yes-success" alt="CPU only">
+  <img src="https://img.shields.io/badge/text%20CAPTCHA-99.5%25%20exact-brightgreen" alt="Text CAPTCHA 99.5% exact">
+  <img src="https://img.shields.io/badge/grid%20CAPTCHA-99.1%25%20%2F%203%20tries-brightgreen" alt="Grid CAPTCHA 99.1% within 3 tries">
+  <img src="https://img.shields.io/badge/third--party%20services-none-informational" alt="No third-party services">
+</p>
+
 # CAPTCHA Solver
 
 Two CAPTCHA solvers in one repo, both **CPU-only** (no GPU needed):
@@ -13,6 +27,10 @@ inference time.
 ---
 
 ## Results
+
+<p align="center">
+  <img src="assets/results.svg" alt="Measured accuracy: text CAPTCHA 99.5% on hard tier, image grid 99.1% within 3 tries, Tesseract baseline 3.0%" width="620">
+</p>
 
 Measured on held-out test sets built by the included generators (200 images per
 difficulty tier, lowercase 5–6 character codes). Exact match = whole string correct.
