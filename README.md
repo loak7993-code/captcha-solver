@@ -83,7 +83,7 @@ because that is the actual cost of one shared network:
 The grid collapse is structural, not a bug: a shared trunk forces a grayscale
 48px input (the text task needs height 48), while object recognition wants 224px
 colour, and ~400 labelled photos cannot train a from-scratch trunk to match CLIP.
-Full analysis in [`NOTES_BRAIN.md`](NOTES_BRAIN.md).
+The sharing also cost the text head ~15 points, so neither task wins.
 
 **Recommendation: keep the default `backend="specialists"`.** Both backends are
 behind the same `solve()` call, so it is one entry point either way.
@@ -196,8 +196,12 @@ headline number:
 | greedy (`live N --greedy`) | ~93% |
 | **TTA + beam-8 (`live N`, default)** | **~100%** |
 
-Full write-up, including the CTC blank-plateau trap that cost a run and the
-`can-it-overfit-16-images?` diagnostic: [`NOTES_CERN.md`](NOTES_CERN.md).
+**The trap that cost a run:** training CTC from scratch on the full corpus gave
+20 epochs with loss pinned at **4.130** — which is `ln(62)`, i.e. a uniform
+distribution over the 62 classes that never escapes. The cheap diagnostic is
+*can it overfit 16 images?* — at a higher LR it could, proving the code path was
+fine and the failure was purely optimisation. Continuing from a converged
+checkpoint instead of cold-starting fixed it (loss 0.146 → 0.003).
 
 ---
 
@@ -228,6 +232,21 @@ difficulty tier, lowercase 5–6 character codes). Exact match = whole string co
 The grid number is single-attempt. Real CAPTCHAs let you request a fresh grid,
 so the practical success rate is the "within 3 tries" column.
 
+### Field test: adversarial WAF grids
+
+On **AWS WAF** tiles — ML-generated, where each distractor is a near-miss of the
+target — the natural-photo number does not transfer, and it is a domain gap
+rather than a tuning problem. `target="clock"` is exact; `target="bucket"`
+selects buckets *and* bucket-shaped planters, because the near-misses score above
+the true positives.
+
+Neither better prompts nor a larger backbone (CLIP L/14, which made it *worse*)
+fixes it. What does: **domain-adapt the head on labelled target tiles**. The WAF
+validation endpoint is a free label oracle, so the corpus labels itself —
+exact-set match on held-out WAF grids went **30% → 70%** from 31 training
+problems, against a 95% VLM reference. The remaining gap is data volume and label
+hygiene, not method. Reproduce with `solve_grid(..., head_path="waf-head.pt")`.
+
 ---
 
 ## How it works
@@ -245,7 +264,7 @@ image → preprocessing → CRNN (CNN + BiLSTM) + CTC → beam search
   the result.
 - **Model soup** averages several independently trained models.
 
-Three lessons that mattered more than the architecture (all in `NOTES.md`):
+Three lessons that mattered more than the architecture:
 1. **Train on the hard distribution.** The first model scored 72.5% on the hard
    tier only because it had never seen that distortion.
 2. **Never cold-start.** Training CTC from scratch collapses to a blank plateau
@@ -336,7 +355,22 @@ selected, scores, (rows, cols) = solve_grid("grid.png", "traffic light")
 | `grid_head.py`, `grid_probe.py` | train and evaluate the grid head |
 | `eval_grid.py`, `fetch_commons.py` | grid testbed build + evaluation |
 | `pool_bench.py` | score a pool of checkpoints, pick the soup |
-| `NOTES.md`, `NOTES_GRID.md` | full results and the traps found along the way |
+
+---
+
+## Traps worth knowing (all measured here)
+
+| trap | signature | fix |
+|---|---|---|
+| **Cold-start CTC collapses** | loss pinned at `ln(n_classes)` (4.130 for 62 classes), val 0.000 forever | never cold-start: continue from a converged checkpoint. Diagnostic first: *can it overfit 16 images?* If yes, it's the optimiser, not the model |
+| **Alphabet must express the answer** | 0/40 on a real target | a 31-char lowercase model can never match a case-sensitive mixed-case target. Match the charset |
+| **Replicate the target's renderer** | 0/40 → 199/200 | port the generator exactly (font, rotation, colour, JPEG) instead of hoping to generalise |
+| **Averaging across vocabularies hurts** | ensemble 63% vs best member 72.5% | only average same-vocabulary, comparable-strength models |
+| **Prompting can't fix confusables** | bucket selected buckets *and* planters | domain-adapt the head on labelled target tiles (30% → 70%); bigger CLIP (L/14) made it *worse* |
+| **Thread oversubscription** | 8 threads measured **23× slower** than 4 | sweep it — 4 was optimal here; the box's load average also poisoned an early reading |
+| **Beam width ≠ accuracy** | beam-4 = beam-8 = beam-12 (98.5%) | beam-4 is 1.8× cheaper for the same result |
+
+---
 
 ---
 

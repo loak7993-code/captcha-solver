@@ -8,7 +8,7 @@ specialist applies, runs it, and returns one uniform result.
   image grids    ("click all the X")    -> CLIP + head     (solve_grid)
 
 What this is NOT: a single neural network. There is no one model that both
-reads text and selects tiles here — see README/NOTES for why (the local
+reads text and selects tiles here — see README for why (the local
 vision-language-model route needs torchvision's image processor, which is
 broken in this environment). This is one *interface* over two specialists,
 chosen automatically.
@@ -24,6 +24,7 @@ chosen automatically.
 import os
 import sys
 import json
+import math
 import tempfile
 from dataclasses import dataclass, field, asdict
 
@@ -95,19 +96,128 @@ PRESETS = {
 }
 
 
+# --------------------------------------------------------------------------- Jev-style decisions
+# Typed outputs only: an action to perform, with calibrated confidence.
+# No prose, no generated explanation - the caller acts on the value.
+ACTIONS = ("type", "click", "retry")
+
+
+@dataclass
+class Decision:
+    """A machine-native decision: what to do, where, and how sure we are."""
+    action: str                     # "type" | "click" | "retry"
+    confidence: float = 0.0         # calibrated 0..1
+    target: str = ""
+    value: str = ""                 # action=type   -> the string to submit
+    cells: list = field(default_factory=list)      # action=click -> [[row, col], ...]
+    points: list = field(default_factory=list)     # action=click -> [[x, y], ...] centres
+    scores: dict = field(default_factory=dict)     # per-option probabilities
+    reason: str = ""                # short machine token, not prose
+
+    def to_json(self):
+        return json.dumps(asdict(self))
+
+    def __str__(self):
+        if self.action == "type":
+            return f"type {self.value}  conf={self.confidence:.2f}"
+        if self.action == "click":
+            pts = " ".join(f"({x},{y})" for x, y in self.points)
+            return f"click {pts}  conf={self.confidence:.2f}"
+        return f"retry  conf={self.confidence:.2f}  reason={self.reason}"
+
+
+def decide(image, target=None, kind=None, backend="specialists",
+           speed="balanced", retry_below=0.6, **kw):
+    """Return a typed Decision instead of a descriptive Result.
+
+    action="type"   -> submit `value`
+    action="click"  -> click each (x, y) in `points` (tiles `cells`)
+    action="retry"  -> confidence too low; request a fresh CAPTCHA
+
+    This is the Jev pattern applied here: one non-autoregressive pass, typed
+    output, no free text. The caller never has to parse anything.
+    """
+    r = solve(image, target=target, kind=kind, backend=backend, speed=speed, **kw)
+
+    if r.kind == "text":
+        if not r.text:
+            return Decision(action="retry", confidence=0.0, reason="empty_read")
+        if r.confidence < retry_below:
+            return Decision(action="retry", confidence=r.confidence, reason="low_confidence",
+                            scores={"text": r.text})
+        return Decision(action="type", confidence=r.confidence, value=r.text,
+                        scores={"text": r.text})
+
+    # grid
+    if not r.selected:
+        return Decision(action="retry", confidence=r.confidence, target=r.target,
+                        reason="no_tile_above_threshold",
+                        scores={"tiles": r.detail.get("scores", [])})
+    if r.confidence < retry_below:
+        return Decision(action="retry", confidence=r.confidence, target=r.target,
+                        reason="low_confidence",
+                        scores={"tiles": r.detail.get("scores", [])})
+
+    rows, cols = r.detail.get("rows", 3), r.detail.get("cols", 3)
+    img = image if isinstance(image, Image.Image) else Image.open(image)
+    from solve_grid import tile_boxes
+    boxes = tile_boxes(img, rows, cols)
+    cells = [[i // cols, i % cols] for i in r.selected]
+    points = [[(boxes[i][0] + boxes[i][2]) // 2, (boxes[i][1] + boxes[i][3]) // 2]
+              for i in r.selected]
+    return Decision(action="click", confidence=r.confidence, target=r.target,
+                    cells=cells, points=points,
+                    scores={"tiles": r.detail.get("scores", [])})
+
+
+# --------------------------------------------------------------------------- brain backend
+_BRAIN = None
+
+
+def _brain():
+    """Load the single multi-task network (brain.pt), if present."""
+    global _BRAIN
+    if _BRAIN is None:
+        import brain as brain_mod
+        if not os.path.exists(brain_mod.BRAIN_PATH):
+            raise FileNotFoundError(
+                f"no single-brain checkpoint at {brain_mod.BRAIN_PATH}\n"
+                "train it with:  python3 brain.py 18")
+        _BRAIN = brain_mod.load_brain()
+    return _BRAIN
+
+
 # --------------------------------------------------------------------------- main API
 def solve(image, target=None, kind=None, candidates=None, threshold=0.3,
-          speed="balanced", **kw):
+          speed="balanced", backend="specialists", **kw):
     """Solve one CAPTCHA. Returns a `Result`.
 
     image       path or PIL.Image
     target      challenge label for grids ("traffic light"); ignored for text
     kind        force "text" or "grid" instead of auto-detecting
     candidates  candidate class list for discriminative grid scoring
-    speed       "fast" | "balanced" (default) | "accurate"
+    speed       "fast" | "balanced" (default) | "accurate"  (specialists only)
+    backend     "specialists" (default, one model per task, most accurate)
+                "brain" (ONE multi-task network with a shared trunk)
     """
     img = image if isinstance(image, Image.Image) else Image.open(image)
     kind = kind or detect_kind(img, target)
+
+    if backend == "brain":
+        model, classes = _brain()
+        import brain as brain_mod
+        if kind == "text":
+            text = brain_mod.read_text(model, img)
+            return Result(kind="text", text=text, confidence=1.0,
+                          detail={"backend": "brain"})
+        if not target:
+            raise ValueError("grid CAPTCHAs need a target label, e.g. target='traffic light'")
+        sel, scores, (rows, cols) = brain_mod.solve_grid_brain(model, classes, img, target)
+        conf = float(max([scores[i] for i in sel], default=0.0))
+        return Result(kind="grid", selected=list(sel), confidence=conf, target=target,
+                      detail={"rows": rows, "cols": cols, "backend": "brain",
+                              "scores": [round(float(s), 3) for s in scores]})
+
     preset = PRESETS.get(speed, PRESETS["balanced"])
 
     if kind == "text":
@@ -119,8 +229,11 @@ def solve(image, target=None, kind=None, candidates=None, threshold=0.3,
         finally:
             if tmp:
                 os.unlink(tmp)
-        return Result(kind="text", text=text, confidence=float(score),
-                      detail={"chars": len(text), "speed": speed})
+        # solve_pro returns a length-normalised log-prob; exp() makes it a
+        # calibrated per-character probability in (0, 1]
+        conf = float(math.exp(score)) if score < 0 else 1.0
+        return Result(kind="text", text=text, confidence=conf,
+                      detail={"chars": len(text), "speed": speed, "backend": backend})
 
     if not target:
         raise ValueError("grid CAPTCHAs need a target label, e.g. target='traffic light'")
@@ -150,11 +263,25 @@ def main(argv):
     ap.add_argument("--classes", nargs="*", help="candidate classes for grid scoring")
     ap.add_argument("--threshold", type=float, default=0.3)
     ap.add_argument("--speed", choices=["fast", "balanced", "accurate"], default="balanced")
+    ap.add_argument("--backend", choices=["specialists", "brain"], default="specialists",
+                    help="specialists = one model per task; brain = one shared multi-task net")
+    ap.add_argument("--decide", action="store_true",
+                    help="typed decision only: action + points, no description")
+    ap.add_argument("--retry-below", type=float, default=0.6,
+                    help="confidence under which the decision is action=retry")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     a = ap.parse_args(argv)
 
+    if a.decide:
+        d = decide(a.image, target=a.target, kind=a.kind, candidates=a.classes,
+                   threshold=a.threshold, speed=a.speed, backend=a.backend,
+                   retry_below=a.retry_below)
+        print(d.to_json() if a.json else str(d))
+        return 0
+
     r = solve(a.image, target=a.target, kind=a.kind,
-              candidates=a.classes, threshold=a.threshold, speed=a.speed)
+              candidates=a.classes, threshold=a.threshold,
+              speed=a.speed, backend=a.backend)
     print(r.to_json() if a.json else str(r))
     return 0
 

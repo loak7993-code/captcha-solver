@@ -10,7 +10,7 @@ One checkpoint, one set of weights, one forward pass. There is no router and no
 second model: the same trunk learns both representations. Which head you read
 out depends on the task, not on which network you loaded.
 
-Trade-off (measured, see NOTES_BRAIN.md): the single brain is a little behind the
+Trade-off (measured, see README): the single brain is a little behind the
 two specialists, because the trunk must split its capacity across both tasks and
 the tile task is data-starved compared with the text task. The specialists remain
 available; this exists because "one brain" is a real, different design.

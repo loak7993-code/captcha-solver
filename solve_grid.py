@@ -122,28 +122,29 @@ def _prompts_for(c, override=None):
             f"a picture of a {c}", f"a cropped photo of a {c}"]
 
 
-_HEAD = None
 HEAD_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "grid_head.pt")
+_HEADS = {}          # keyed by resolved path: two heads can coexist
 
 
 def _head(path=None):
     """Load the trained MLP head on CLIP features (grid_head.pt).
 
     Loaded with weights_only=True: the file holds only tensors and plain
-    Python lists, so no unpickling of arbitrary objects is needed."""
-    global _HEAD
-    if _HEAD is None:
+    Python lists, so no unpickling of arbitrary objects is needed.
+    Cached per resolved path, so asking for a second head returns *that* head."""
+    key = os.path.abspath(path or HEAD_PATH)
+    if key not in _HEADS:
         import torch
         import torch.nn as nn
-        d = torch.load(path or HEAD_PATH, map_location="cpu", weights_only=True)
+        d = torch.load(key, map_location="cpu", weights_only=True)
         C = len(d["classes"])
         net = nn.Sequential(nn.Linear(512, 512), nn.ReLU(), nn.Dropout(0.2),
                             nn.Linear(512, C))
         net.load_state_dict(d["state_dict"]); net.eval()
         mean = np.asarray(d["mean"], dtype=np.float32)
         std = np.asarray(d["std"], dtype=np.float32)
-        _HEAD = (net, d["classes"], mean, std)
-    return _HEAD
+        _HEADS[key] = (net, d["classes"], mean, std)
+    return _HEADS[key]
 
 
 def score_tiles_head(tiles, target, clip=None, tta=True, head_path=None):
@@ -162,6 +163,10 @@ def score_tiles_head(tiles, target, clip=None, tta=True, head_path=None):
     with torch.no_grad():
         P = torch.softmax(net(torch.tensor(X, dtype=torch.float32)), 1).numpy()
     P = P.reshape(len(views), len(tiles), -1).mean(axis=0)
+    if target not in classes:
+        # target outside the head's vocabulary: no opinion -> empty selection
+        # so the caller can retry or fall back to zero-shot instead of crashing
+        return np.zeros(len(tiles), dtype=np.float32), np.zeros(len(tiles), dtype=bool)
     ti = classes.index(target)
     return P[:, ti], P.argmax(1) == ti
 
@@ -232,7 +237,7 @@ def score_tiles(tiles, target, candidates=None, negatives=None, clip=None, tta=T
 
 def solve_grid(path_or_img, target, rows=None, cols=None,
                threshold=0.3, inset=3, clip=None, candidates=None, use_head=None,
-               tta=True, prompt_override=None):
+               tta=True, prompt_override=None, head_path=None):
     """Returns (selected_indices, scores, (rows, cols)).
 
     selected_indices: 0-based tile indices chosen as containing `target`.
@@ -247,14 +252,15 @@ def solve_grid(path_or_img, target, rows=None, cols=None,
     tiles = split_grid(img, rows, cols, inset=inset)
     if use_head is None:
         use_head = False
-        if os.path.exists(HEAD_PATH):
+        if os.path.exists(head_path or HEAD_PATH):
             try:
-                _, hclasses, _, _ = _head()
+                _, hclasses, _, _ = _head(head_path)
                 use_head = target in hclasses
             except Exception:
                 use_head = False
     if use_head:
-        scores, wins = score_tiles_head(tiles, target, clip=clip, tta=tta)
+        scores, wins = score_tiles_head(tiles, target, clip=clip, tta=tta,
+                                        head_path=head_path)
     else:
         scores, wins = score_tiles(tiles, target, candidates=candidates, clip=clip,
                                    tta=tta, prompt_override=prompt_override)
