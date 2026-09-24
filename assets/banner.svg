@@ -1,49 +1,133 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="240" viewBox="0 0 1000 240" role="img" aria-label="CAPTCHA Solver">
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="340" viewBox="0 0 1200 340" role="img" aria-label="CAPTCHA Solver &#8212; text OCR and image-grid selection, CPU-only">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#0b1020"/>
-      <stop offset="55%" stop-color="#111a33"/>
-      <stop offset="100%" stop-color="#0d2540"/>
+      <stop offset="0%"   stop-color="#070c18"/>
+      <stop offset="45%"  stop-color="#0d1730"/>
+      <stop offset="100%" stop-color="#0a2038"/>
     </linearGradient>
+    <radialGradient id="blobA" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#38f0c8" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="#38f0c8" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="blobB" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#5aa9ff" stop-opacity="0.20"/>
+      <stop offset="100%" stop-color="#5aa9ff" stop-opacity="0"/>
+    </radialGradient>
     <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0%" stop-color="#38f0c8"/>
-      <stop offset="100%" stop-color="#5aa9ff"/>
+      <stop offset="0%"   stop-color="#38f0c8"/>
+      <stop offset="100%" stop-color="#57b0ff"/>
     </linearGradient>
-    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="6" result="b"/>
+    <linearGradient id="rule" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#38f0c8"/>
+      <stop offset="70%"  stop-color="#57b0ff"/>
+      <stop offset="100%" stop-color="#57b0ff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#121c33"/>
+      <stop offset="100%" stop-color="#0c1526"/>
+    </linearGradient>
+    <pattern id="dots" width="26" height="26" patternUnits="userSpaceOnUse">
+      <circle cx="1.5" cy="1.5" r="1.5" fill="#2b446f"/>
+    </pattern>
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="4" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
 
-  <rect width="1000" height="240" rx="18" fill="url(#bg)"/>
-  <rect x="0.75" y="0.75" width="998.5" height="238.5" rx="18" fill="none" stroke="#22345c" stroke-width="1.5"/>
+  <!-- backdrop -->
+  <rect width="1200" height="340" rx="20" fill="url(#bg)"/>
+  <circle cx="1010" cy="70" r="200" fill="url(#blobB)" filter="url(#soft)"/>
+  <circle cx="180" cy="300" r="180" fill="url(#blobA)" filter="url(#soft)"/>
+  <rect width="1200" height="340" rx="20" fill="none" stroke="#20355c" stroke-width="1.5"/>
 
-  <!-- decorative grid tiles -->
-  <g opacity="0.16" fill="none" stroke="url(#accent)" stroke-width="2">
-    <rect x="760" y="40" width="52" height="52" rx="8"/>
-    <rect x="822" y="40" width="52" height="52" rx="8"/>
-    <rect x="884" y="40" width="52" height="52" rx="8"/>
-    <rect x="760" y="102" width="52" height="52" rx="8" stroke="#38f0c8"/>
-    <rect x="822" y="102" width="52" height="52" rx="8"/>
-    <rect x="884" y="102" width="52" height="52" rx="8"/>
-    <rect x="760" y="164" width="52" height="52" rx="8"/>
-    <rect x="822" y="164" width="52" height="52" rx="8"/>
-    <rect x="884" y="164" width="52" height="52" rx="8"/>
+  <!-- faint dot texture, clipped to the panel -->
+  <g opacity="0.5">
+    <rect x="0" y="0" width="1200" height="340" rx="20" fill="url(#dots)"/>
   </g>
+
+  <!-- eyebrow -->
+  <text x="58" y="104" font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif"
+        font-size="13.5" font-weight="600" fill="#6f88b0" letter-spacing="3.2">CPU-ONLY&#160;&#160;&#183;&#160;&#160;NO THIRD-PARTY SERVICES</text>
 
   <!-- title -->
-  <text x="56" y="92" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="52" font-weight="700" fill="#ffffff" letter-spacing="1">CAPTCHA<tspan fill="url(#accent)"> Solver</tspan></text>
-  <text x="58" y="128" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="18" fill="#9fb2d4">Text OCR + image-grid selection &#183; CPU-only &#183; no third-party services</text>
+  <text x="56" y="172" font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif"
+        font-size="64" font-weight="800" fill="#ffffff" letter-spacing="-0.5">CAPTCHA <tspan fill="url(#accent)">SOLVER</tspan></text>
+
+  <!-- rule -->
+  <rect x="58" y="192" width="430" height="4" rx="2" fill="url(#rule)"/>
+
+  <!-- subtitle -->
+  <text x="58" y="230" font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif"
+        font-size="18.5" fill="#9db1d2">Text OCR + image-grid selection, trained and served locally.</text>
 
   <!-- stat pills -->
-  <g font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="16" font-weight="600">
-    <rect x="56" y="152" width="168" height="42" rx="21" fill="#0f1c33" stroke="#2a4a7a"/>
-    <text x="76" y="179" fill="#38f0c8">Text&#160;&#160;<tspan fill="#ffffff">99.5% exact</tspan></text>
+  <g font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif" font-size="15.5" font-weight="600">
+    <rect x="56" y="254" width="176" height="42" rx="21" fill="#0e1a30" stroke="#26456f"/>
+    <text x="76" y="281" fill="#38f0c8">99.5%<tspan fill="#e8eefb"> text exact</tspan></text>
 
-    <rect x="236" y="152" width="196" height="42" rx="21" fill="#0f1c33" stroke="#2a4a7a"/>
-    <text x="256" y="179" fill="#5aa9ff">Grid&#160;&#160;<tspan fill="#ffffff">99.1% / 3 tries</tspan></text>
+    <rect x="244" y="254" width="212" height="42" rx="21" fill="#0e1a30" stroke="#26456f"/>
+    <text x="264" y="281" fill="#57b0ff">99.1%<tspan fill="#e8eefb"> grid / 3 tries</tspan></text>
+
+    <rect x="468" y="254" width="92" height="42" rx="21" fill="#0e1a30" stroke="#26456f"/>
+    <text x="488" y="281" fill="#8aa0c4">MIT</text>
   </g>
 
-  <circle cx="900" cy="204" r="5" fill="#38f0c8" filter="url(#glow)"/>
-  <text x="880" y="209" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="13" fill="#7f92b5" text-anchor="end">MIT licensed</text>
+  <!-- ============ card A: TEXT OCR ============ -->
+  <g>
+    <rect x="656" y="46" width="242" height="248" rx="16" fill="url(#card)" stroke="#22375e" stroke-width="1.4"/>
+    <text x="680" y="80" font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif"
+          font-size="12.5" font-weight="700" fill="#7f92b5" letter-spacing="2.6">TEXT OCR</text>
+
+    <!-- distorted character sample -->
+    <g font-family="Consolas, Menlo, DejaVu Sans Mono, monospace" font-size="46" font-weight="700">
+      <text x="686" y="176" fill="#ffffff" transform="rotate(-9 686 176)">a</text>
+      <text x="726" y="176" fill="#dfe9fb" transform="rotate(7 726 176)">7</text>
+      <text x="766" y="176" fill="#ffffff" transform="rotate(-5 766 176)">K</text>
+      <text x="806" y="176" fill="#dfe9fb" transform="rotate(10 806 176)">q</text>
+      <text x="846" y="176" fill="#ffffff" transform="rotate(-8 846 176)">9</text>
+    </g>
+    <!-- interference lines -->
+    <g stroke="#2f4a74" stroke-width="1.6" opacity="0.85" fill="none">
+      <line x1="676" y1="196" x2="876" y2="140"/>
+      <line x1="676" y1="142" x2="878" y2="188"/>
+    </g>
+
+    <g font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif">
+      <circle cx="686" cy="262" r="5" fill="#38f0c8" filter="url(#glow)"/>
+      <text x="702" y="267" font-size="20" font-weight="800" fill="#38f0c8">99.5%</text>
+      <text x="772" y="267" font-size="14.5" fill="#7f92b5">exact</text>
+    </g>
+  </g>
+
+  <!-- ============ card B: IMAGE GRID ============ -->
+  <g>
+    <rect x="914" y="46" width="242" height="248" rx="16" fill="url(#card)" stroke="#22375e" stroke-width="1.4"/>
+    <text x="938" y="80" font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif"
+          font-size="12.5" font-weight="700" fill="#7f92b5" letter-spacing="2.6">IMAGE GRID</text>
+
+    <!-- 3x3 tiles, three selected -->
+    <g>
+      <rect x="968" y="102" width="40" height="40" rx="7" fill="#1b2c49" stroke="#38f0c8" stroke-width="2.6"/>
+      <rect x="1018" y="102" width="40" height="40" rx="7" fill="#16233c" stroke="#243a5f"/>
+      <rect x="1068" y="102" width="40" height="40" rx="7" fill="#16233c" stroke="#243a5f"/>
+
+      <rect x="968" y="152" width="40" height="40" rx="7" fill="#16233c" stroke="#243a5f"/>
+      <rect x="1018" y="152" width="40" height="40" rx="7" fill="#1b2c49" stroke="#38f0c8" stroke-width="2.6"/>
+      <rect x="1068" y="152" width="40" height="40" rx="7" fill="#16233c" stroke="#243a5f"/>
+
+      <rect x="968" y="202" width="40" height="40" rx="7" fill="#16233c" stroke="#243a5f"/>
+      <rect x="1018" y="202" width="40" height="40" rx="7" fill="#1b2c49" stroke="#5aa9ff" stroke-width="2.6"/>
+      <rect x="1068" y="202" width="40" height="40" rx="7" fill="#16233c" stroke="#243a5f"/>
+    </g>
+
+    <g font-family="Segoe UI, -apple-system, Helvetica, Arial, sans-serif">
+      <circle cx="944" cy="262" r="5" fill="#57b0ff" filter="url(#glow)"/>
+      <text x="960" y="267" font-size="20" font-weight="800" fill="#57b0ff">99.1%</text>
+      <text x="1030" y="267" font-size="14.5" fill="#7f92b5">/ 3 tries</text>
+    </g>
+  </g>
 </svg>
