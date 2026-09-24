@@ -20,8 +20,14 @@ Verified by reading one image by hand: it read `PJT53J`, and `PJT53J` returned
 | | exact | notes |
 |---|---|---|
 | the shipped synthetic-trained solver | **0 / 40** | structurally impossible — see below |
-| **this solver, live API, server-validated** | **47 / 50 (94%)** | 1082 ms/img incl. network |
-| held-out synthetic (800 images) | 91.4% | |
+| first CERN model (6 k images, cold-start) | 47 / 50 (94%) | val 91.4% |
+| **final CERN model (fine-tuned on the full 12 k corpus)** | **199 / 200 (99.5%)** | two independent batches: 100/100 then 99/100 |
+| held-out synthetic (800 images) | 98.2% | up from 91.4% |
+
+Live runs are server-validated: the service answered `200 {"message":"Valid"}` for
+199 of 200, at ~1.0 s/img including network.
+
+**0 / 40 → 199 / 200.** No real images were ever used for training.
 
 ## Why the shipped model scored 0/40
 
@@ -61,23 +67,46 @@ This is exactly the "a faithful renderer is the key lever" result from the
 literature, reproduced end-to-end: **0/40 → 47/50** with no real images used for
 training at all.
 
-## The trap that cost a run
+## The two traps that each cost a run
 
-The first training attempt (lr 1.5e-3, 14 epochs) **collapsed to the CTC blank
-plateau** — val-exact 0.000 for every epoch, loss stuck at ~3.4. Before blaming
-the data I tested whether the model could overfit 16 images: at lr 1e-2 it could
-(loss 0.60), proving the code path was fine and it was purely an optimisation
-failure. Retraining at **lr 5e-3** converged cleanly in 18 epochs
-(loss 4.7 → 0.04, val 93.5%).
+**1. Cold-start CTC collapses to a uniform distribution.** Running on the full
+12,000-image corpus at the same lr that had worked on a 6,000 subset produced
+**20 epochs of `val-exact 0.000` with loss pinned at 4.130**. That number is the
+signature: it is `ln(62)`, i.e. the model emitting a uniform distribution over
+the 62 classes and never leaving it.
 
-Same lesson as the main text solver: cold-start CTC is unstable, and the cheap
-diagnostic is always *can it overfit a tiny batch?* — if yes, it is the
-optimiser, not the model.
+The cheap diagnostic, before blaming the data: *can it overfit 16 images?*
+At lr 1e-2 it could (loss 0.60), which proves the code path is fine and the
+failure is purely optimisation. Then the fix that always works:
+
+```bash
+python3 cern_solver.py train 10 0 cern_crnn_6k.pt    # continue, don't cold-start
+```
+
+Starting from a converged checkpoint, loss went 0.146 → 0.003 and val-exact
+0.800 → 0.988 in ten epochs, with no plateau at any point. Same lesson as the
+main text solver's campaign: **never cold-start CTC.**
+
+**2. The alphabet has to be able to express the answer.** Covered above — a
+31-character lowercase model cannot ever be correct against a case-sensitive
+mixed-case target, no matter how long you train it.
+
+## What actually moved the number
+
+1. **Port the renderer exactly** (0/40 → 47/50). The single biggest lever.
+2. **Train on the full corpus** (47/50 → 199/200), reached by fine-tuning rather
+   than cold-starting.
+3. **Beam search** — +2 on a 60-image sample for the 6 k model (51→53). Once the
+   final model is at 98%+ it is saturated: `greedy = beam8 = beam8+TTA`, so the
+   cheap decoder is used.
+4. **TTA** — no measurable gain here. The renderer already rotates each glyph
+   ±50°, so extra rotation views add little. Kept as an option, off by default.
 
 ## Where it still fails
 
-3 of 50. The residual is the hardest interference: an opaque line crossing a
-glyph erases the stroke that distinguishes it (e.g. a line through `f` making it
-read as `l`). That is information destroyed at render time, not a modelling
-problem — which is why real deployments should re-request a CAPTCHA on a
-low-confidence read rather than submit a guess.
+1 of 200. The residual is the hardest interference: an opaque line crossing a
+glyph erases the stroke that distinguishes it (a line through `f` making it read
+as `l`). That is information destroyed at render time, not a modelling problem —
+which is why a real deployment should re-request a CAPTCHA on a low-confidence
+read rather than submit a guess. The `retry` action in `captcha_ai.decide()`
+exists for exactly this.

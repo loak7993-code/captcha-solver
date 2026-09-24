@@ -135,7 +135,7 @@ by the server rather than eyeballed.
 | solver | result |
 |---|---|
 | the synthetic-trained text model | **0 / 40** — it cannot even express the answer |
-| [**`cern_solver.py`**](cern_solver.py) — trained on a ported renderer | **47 / 50 (94%)** validated live |
+| [**`cern_solver.py`**](cern_solver.py) — trained on a ported renderer | **199 / 200 (99.5%)** validated live |
 
 The shipped model scores zero because its alphabet is 31 lowercase characters
 with no `i l o 0 1`, while CERN emits **mixed case** and digits and validates
