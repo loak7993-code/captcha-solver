@@ -62,6 +62,34 @@ What actually made it fast (in order of impact):
 
 ---
 
+## One brain (single multi-task network)
+
+[`brain.py`](brain.py) is **one neural network** for both tasks — one set of
+weights, one forward pass, a shared trunk with a CTC sequence head and a tile
+class head. It is the same non-autoregressive, typed-output, single-pass pattern
+as [Jev](https://typesafe.ai), applied to vision. Train it with
+`python3 brain.py 12 brain.pt crnn_best.pt 1e-3` — the third argument transplants
+a converged text CRNN into the trunk and text head (`missing=0, unexpected=0`),
+which avoids CTC cold-start collapse entirely.
+
+**It works, and it is measurably worse than the specialists** — reported plainly
+because that is the actual cost of one shared network:
+
+| task | single brain | specialists |
+|---|---|---|
+| text CAPTCHAs | 84.0% | **99.5%** |
+| image-grid CAPTCHAs | **6.7%** | **83.3%** |
+
+The grid collapse is structural, not a bug: a shared trunk forces a grayscale
+48px input (the text task needs height 48), while object recognition wants 224px
+colour, and ~400 labelled photos cannot train a from-scratch trunk to match CLIP.
+Full analysis in [`NOTES_BRAIN.md`](NOTES_BRAIN.md).
+
+**Recommendation: keep the default `backend="specialists"`.** Both backends are
+behind the same `solve()` call, so it is one entry point either way.
+
+---
+
 ## Decisions, not descriptions
 
 `decide()` returns a **typed action** instead of a description — no prose, nothing

@@ -6,6 +6,7 @@
 !crnn_best.pt
 !grid_head.pt
 !cern_crnn.pt
+!brain.pt
 
 hfmodel/model.safetensors
 models/
