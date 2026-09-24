@@ -7,6 +7,7 @@
 !grid_head.pt
 !cern_crnn.pt
 !brain.pt
+!cern_crnn.onnx
 
 hfmodel/model.safetensors
 models/

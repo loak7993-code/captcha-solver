@@ -27,6 +27,46 @@ CH2IDX = {c: i for i, c in IDX2CH.items()}
 NCLS = len(ALPHABET) + 1
 H = 48
 CKPT = os.path.join(HERE, "cern_crnn.pt")
+ONNX_PATH = os.path.join(HERE, "cern_crnn.onnx")
+
+
+class OnnxCRNN:
+    """Drop-in replacement for the torch CRNN, running under ONNX Runtime.
+
+    Measured 2x faster than PyTorch on CPU for this model (4.0 vs 8.3 ms/img),
+    with identical predictions. Exposes __call__ so logp()/predict2() are
+    unchanged."""
+
+    def __init__(self, path=ONNX_PATH, threads=4):
+        import onnxruntime as ort
+        so = ort.SessionOptions()
+        so.intra_op_num_threads = threads
+        so.log_severity_level = 3
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        self.sess = ort.InferenceSession(path, so, providers=["CPUExecutionProvider"])
+
+    def eval(self):
+        return self
+
+    def __call__(self, x):
+        arr = x.detach().cpu().numpy().astype(np.float32)
+        out = self.sess.run(None, {"x": arr})[0]
+        return torch.from_numpy(out)
+
+
+def export_onnx(ckpt=CKPT, out=ONNX_PATH):
+    """Export the trained CRNN to ONNX (batch and width dynamic)."""
+    import warnings
+    m = load(ckpt, backend="torch")
+    dummy = torch.randn(1, 1, H, 200)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        torch.onnx.export(m, dummy, out, input_names=["x"], output_names=["logp"],
+                          dynamic_axes={"x": {0: "batch", 3: "width"},
+                                        "logp": {0: "batch", 1: "T"}},
+                          opset_version=17, dynamo=False)
+    print(f"exported {out} ({os.path.getsize(out)/1e6:.1f} MB)", flush=True)
+    return out
 
 
 class CernDS(Dataset):
@@ -143,6 +183,25 @@ def predict2(model, path, tta=True, beam=8):
     return beam_search(lp, beam) if beam else greedy(lp[None] if lp.dim() == 2 else lp)
 
 
+@torch.no_grad()
+def predict_cascade(model, path, tta=True, beam=8, conf=0.90):
+    """Greedy first, escalate only when unsure.
+
+    A single forward pass (~4 ms on ONNX) gives the greedy read plus a per
+    character confidence. If every emitted character is at least `conf`, that
+    read is returned; otherwise fall back to the expensive TTA + beam path.
+    Most reads are confident, so the average cost drops sharply while the hard
+    cases still get the strong decoder."""
+    lp = logp(model, path, tta=False)                 # (T, C)
+    ids = lp.argmax(-1)
+    p = lp.exp().max(-1).values
+    text = greedy(lp[None])
+    emitted = [float(q) for i, q in zip(ids.tolist(), p.tolist()) if i != 0]
+    if text and emitted and min(emitted) >= conf:
+        return text
+    return predict2(model, path, tta=tta, beam=beam)
+
+
 def train(epochs=20, bs=64, lr=5e-3, root="data/cern_train", out=CKPT, limit=0, init=None):
     labels = json.load(open(os.path.join(root, "labels.json")))
     items = list(labels.items()); random.seed(0); random.shuffle(items)
@@ -188,42 +247,71 @@ def evaluate(model, root, labels, tta=False, beam=0):
     return ok / max(1, len(labels))
 
 
-def load(path=CKPT):
+def load(path=CKPT, backend="auto", threads=4):
+    """Load the reader. Prefers the ONNX Runtime session (2x faster); falls back
+    to PyTorch. `backend` = "auto" | "onnx" | "torch"."""
+    if backend in ("auto", "onnx") and os.path.exists(ONNX_PATH) and path == CKPT:
+        try:
+            return OnnxCRNN(threads=threads)
+        except Exception as e:
+            if backend == "onnx":
+                raise
+            print(f"onnx unavailable ({e}); using torch", flush=True)
     m = CRNN(ncls=NCLS)
     m.load_state_dict(torch.load(path, map_location="cpu"))
     m.eval()
     return m
 
 
-def live(n=50, tta=True, beam=8):
+def _live_one(i, model, tta, beam):
+    """Fetch one challenge, solve it, validate it. Returns (index, answer, ok)."""
+    import base64, urllib.request, urllib.error, http.cookiejar
+    jar = http.cookiejar.CookieJar()
+    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+    with op.open("https://captcha.web.cern.ch/api/v1.0/captcha/", timeout=25) as r:
+        d = json.load(r)
+    p = f"/tmp/cern_live_{i}.jpg"
+    with open(p, "wb") as f:
+        f.write(base64.b64decode(d["img"].split(",", 1)[1]))
+    ans = predict2(model, p, tta=tta, beam=beam) if (tta or beam) else predict(model, p)
+    body = json.dumps({"id": d["id"], "answer": ans}).encode()
+    req = urllib.request.Request("https://captcha.web.cern.ch/api/v1.0/captcha/",
+                                 data=body, headers={"Content-Type": "application/json"})
+    try:
+        with op.open(req, timeout=25) as resp:
+            ok = resp.status == 200
+    except urllib.error.HTTPError:
+        ok = False
+    except Exception:
+        ok = False
+    return i, ans, ok
+
+
+def live(n=50, tta=True, beam=8, workers=8):
     """Solve real CAPTCHAs from the live CERN API and validate the answers.
 
-    Defaults to the strong decoder (TTA + CTC beam search): it costs ~+33 ms/img
-    over greedy and is worth several points, so the default should be the number
-    the README quotes. Pass tta=False, beam=0 for the fast path."""
-    import base64, urllib.request, urllib.error, http.cookiejar
-    model = load()
+    Defaults to the strong decoder (TTA + CTC beam search): it is worth a few
+    points on the live distribution (90 samples: greedy 96.7%, strong 100%) and
+    the harness is network-bound anyway (~1 s/request), so the extra ~35 ms of
+    decoding is irrelevant here. Pass tta=False, beam=0 for greedy.
+
+    The requests themselves run concurrently (`workers`), which is what actually
+    sets the wall clock: ~1 s/img serial -> ~n/workers seconds.
+    """
+    import concurrent.futures as cf
+    if workers > 1:
+        torch.set_num_threads(1)          # avoid oversubscribing n workers
+    model = load(backend="auto", threads=2 if workers > 1 else 4)
     ok = 0; t0 = time.time()
-    for i in range(n):
-        jar = http.cookiejar.CookieJar()
-        op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
-        with op.open("https://captcha.web.cern.ch/api/v1.0/captcha/", timeout=20) as r:
-            d = json.load(r)
-        p = f"/tmp/cern_live_{i}.jpg"
-        open(p, "wb").write(base64.b64decode(d["img"].split(",", 1)[1]))
-        ans = predict2(model, p, tta=tta, beam=beam) if (tta or beam) else predict(model, p)
-        body = json.dumps({"id": d["id"], "answer": ans}).encode()
-        req = urllib.request.Request("https://captcha.web.cern.ch/api/v1.0/captcha/",
-                                     data=body, headers={"Content-Type": "application/json"})
-        try:
-            with op.open(req, timeout=20) as resp:
-                good = resp.status == 200
-        except urllib.error.HTTPError:
-            good = False
-        ok += good
-        print(f"  {i+1:3d}/{n}  read={ans:8s} {'OK' if good else '--'}", flush=True)
+    with cf.ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = [ex.submit(_live_one, i, model, tta, beam) for i in range(n)]
+        for done, fut in enumerate(cf.as_completed(futs), 1):
+            i, ans, good = fut.result()
+            ok += good
+            print(f"  {done:3d}/{n}  read={ans:8s} {'OK' if good else '--'}", flush=True)
+    dt = time.time() - t0
     print(f"live CERN API: {ok}/{n} validated correct "
-          f"({(time.time()-t0)/n*1000:.0f} ms/img)  tta={tta} beam={beam}")
+          f"({dt/n*1000:.0f} ms/img wall, {workers} workers)  tta={tta} beam={beam}")
 
 
 if __name__ == "__main__":
@@ -238,15 +326,21 @@ if __name__ == "__main__":
         print(f"val greedy      : {evaluate(m, 'data/cern_val', lab)*100:.1f}% ({len(lab)})")
         print(f"val beam8       : {evaluate(m, 'data/cern_val', lab, beam=8)*100:.1f}%")
         print(f"val beam8 + TTA : {evaluate(m, 'data/cern_val', lab, tta=True, beam=8)*100:.1f}%")
+    elif cmd == "export":
+        export_onnx()
     elif cmd == "live":
         # strong decoder is the default; `--greedy` opts into the fast path
         args = sys.argv[2:]
         use_greedy = "--greedy" in args
+        workers = 8
+        if "--workers" in args:
+            j = args.index("--workers"); workers = int(args[j + 1])
+            args = args[:j] + args[j + 2:]
         args = [a for a in args if a != "--greedy"]
         n = int(args[0]) if args else 50
         if use_greedy:
-            live(n, tta=False, beam=0)
+            live(n, tta=False, beam=0, workers=workers)
         else:
             tta = "greedy" not in args
             beam = int(args[1]) if len(args) > 1 else 8
-            live(n, tta=tta, beam=beam)
+            live(n, tta=tta, beam=beam, workers=workers)

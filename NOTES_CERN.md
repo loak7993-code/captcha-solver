@@ -67,6 +67,42 @@ This is exactly the "a faithful renderer is the key lever" result from the
 literature, reproduced end-to-end: **0/40 → 47/50** with no real images used for
 training at all.
 
+## Speed
+
+Everything is CPU-only. Measured on this box (8 cores, shared load).
+
+**Local decoding** (`predict` / `predict2`), 200 held-out images:
+
+| decoder | PyTorch | ONNX Runtime | accuracy |
+|---|---|---|---|
+| greedy (1 view) | 8.5 ms | **4.0 ms** | 99.0% |
+| TTA + beam-8 | 54.4 ms | **38.5 ms** | 98.5% |
+| TTA + beam-4 | — | **21.0 ms** | 98.5% |
+
+`cern_solver.py export` writes `cern_crnn.onnx`; `load()` picks it up
+automatically (2.1x on greedy, 1.4x on the strong path, identical predictions).
+Beam width changes cost but not accuracy here — beam-4 is 1.8x faster than beam-8
+for the same result.
+
+**Live harness**, n=60 with the strong decoder:
+
+| workers | wall clock | result |
+|---|---|---|
+| 1 (serial) | 1124 ms/img | 58/60 |
+| **8 (default)** | **277 ms/img** | 58/60 |
+| 16 | 329 ms/img | 56/60 |
+
+The live path is **network-bound** (~1 s per request), so the only thing that
+matters there is concurrency: 8 workers is a **4.1x** wall-clock win. 16
+oversubscribes and is worse on both time and score.
+
+**Why the strong decoder is still the default on `live`** despite being slower:
+across 90 live samples, greedy scored 96.7% and TTA+beam scored 100%. On the
+synthetic held-out set they are tied (greedy 99.0%, strong 98.5%) — so the live
+distribution is the one that decides, and it favours the strong decoder. The
+harness is network-bound anyway, so the extra ~35 ms costs nothing in practice.
+For bulk offline reading, greedy + ONNX at 4 ms/img is the fast path.
+
 ## The two traps that each cost a run
 
 **1. Cold-start CTC collapses to a uniform distribution.** Running on the full
