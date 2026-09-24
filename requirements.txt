@@ -1,8 +1,17 @@
-# core
-torch>=2.4
+# ---- runtime (everything below is needed by the default paths) ----
+torch>=2.4          # model training + PyTorch inference
 numpy
 pillow
+safetensors         # loading the optional pretrained CRNN weights
 
-# image-grid solver (CLIP via ONNX Runtime — avoids the torchvision dependency)
+# ---- image-grid solver: CLIP via ONNX Runtime ----
+# Deliberately NOT transformers/torchvision: torchvision's C extension is
+# ABI-broken against this torch build, and transformers would only have been
+# pulled in for one unused import. The whole default stack imports with both
+# of those packages absent.
 onnxruntime
 tokenizers
+
+# ---- optional: only to re-export a model to ONNX (`cern_solver.py export`) ----
+# onnx
+# onnxscript

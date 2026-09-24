@@ -10,7 +10,10 @@ import torch
 import torch.nn as nn
 from PIL import Image
 from safetensors.torch import load_file
-from transformers.modeling_outputs import SequenceClassifierOutput
+# NOTE: no transformers import. This file used to pull in
+# `transformers.modeling_outputs.SequenceClassifierOutput` without ever using
+# it, which forced the whole transformers package (and its dependency tree) onto
+# the default text path. The model returns a plain tensor.
 
 VOCAB = string.ascii_lowercase + string.ascii_uppercase + string.digits
 IDX2CH = {i + 1: c for i, c in enumerate(VOCAB)}

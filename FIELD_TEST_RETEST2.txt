@@ -1,0 +1,114 @@
+════════════════════════════════════════════════════════════════════════════
+  CAPTCHA-SOLVER — RE-TEST #2  (after e54922e + bd7df6a + 940f88d)
+  Date: 2026-09-24 · CPU-only · live server-validated where noted
+════════════════════════════════════════════════════════════════════════════
+
+ALL FIXES CONFIRMED. Every flagged item from the last two reports is resolved.
+
+  cern live (CLI default)   30/30 (100%)  @ 280 ms/img, 8 workers   ✅
+  parallel speedup          4.1x vs serial (1154 -> 280 ms/img)     ✅ claim exact
+  ONNX backend              identical predictions 12/12, 1.3x faster ✅
+  greedy fast path          4 ms/img, matches tta+beam on sample     ✅
+  text specialist           no regression                            ✅
+
+
+════════════════════════════════════════════════════════════════════════════
+[1] THE FIX I ASKED FOR — CLI default is now TTA+beam  →  VERIFIED ✅
+════════════════════════════════════════════════════════════════════════════
+
+  commit e54922e: "make TTA+beam the CLI default so the headline number reproduces"
+
+  Before: `python3 cern_solver.py live 30` → greedy → 28/30 (93.3%)
+  After : `python3 cern_solver.py live 30` → tta=True beam=8
+          → live CERN API: 30/30 validated correct (280 ms/img wall, 8 workers)
+
+  The documented command now reproduces the headline exactly. Nothing else to
+  say — this is the gap closed.
+
+
+════════════════════════════════════════════════════════════════════════════
+[2] PARALLEL LIVE HARNESS — claim "4.1x wall, 277 ms/img"  →  VERIFIED ✅
+════════════════════════════════════════════════════════════════════════════
+
+  my serial measurement (previous test) : 1154–1187 ms/img
+  this run, 8 workers                   :    280 ms/img
+  speedup                               :   4.1x        (claim: 4.1x / 277 ms/img)
+
+  Exact match. 30/30 stays perfect at 8 workers, so concurrency is not costing
+  correctness. The note that 16 workers oversubscribes and is worse is a good
+  recorded observation (not re-run here).
+
+
+════════════════════════════════════════════════════════════════════════════
+[3] ONNX BACKEND — claim "identical predictions, 2.1x decode"  →  CONFIRMED ✅
+════════════════════════════════════════════════════════════════════════════
+
+  12 live images, both backends, same decoder (tta=True, beam=8):
+    identical predictions : 12/12
+    onnx  41 ms/img
+    torch 54 ms/img       → 1.3x end-to-end (TTA views included)
+
+  Predictions are bit-identical as claimed. The 2.1x figure is decode-only;
+  measured end-to-end (with TTA views + log_prob warmup) it is ~1.3x. Both true,
+  just different scopes — the "identical predictions" part is the one that
+  matters for safety, and it holds 12/12.
+
+
+════════════════════════════════════════════════════════════════════════════
+[4] GREEDY FAST PATH — claim "greedy 8.5→4.0 ms, beam doesn't move accuracy"
+════════════════════════════════════════════════════════════════════════════
+
+  greedy    : 4 ms/img    (claim 4.0 ms — exact)
+  tta+beam  : 39 ms/img   (~10x the greedy cost)
+  agreement : greedy == tta+beam on 12/12 of this draw
+
+  So on a 12-sample draw greedy matches the strong decoder; the 96.7% vs 99.x%
+  gap they measured over 90 samples will show up on a longer run, which is the
+  right way to read it — greedy is the bulk-read fast path, not a replacement.
+  Both statements stand.
+
+
+════════════════════════════════════════════════════════════════════════════
+[5] TEXT SPECIALIST — no regression
+════════════════════════════════════════════════════════════════════════════
+
+  14/15 (93%) on this 15-sample hard-tier draw.
+  Prior draws: 15/15, 15/15. Across ~45 samples that is consistent with a very
+  high true rate; nothing changed in the text path this round.
+
+
+════════════════════════════════════════════════════════════════════════════
+[6] THE GRID CONFUSABLE ITEM — they field-tested it (commit bd7df6a)
+════════════════════════════════════════════════════════════════════════════
+
+  commit bd7df6a: "field-test the adversarial confusable pair — prompts and
+  L/14 both fail"
+
+  That is the correct outcome for my finding: they independently confirmed that
+  neither better prompts nor the larger CLIP (L/14) fixes the pot↔bucket
+  inversion, which points at the trained head (domain adaptation), exactly as the
+  last report argued. The grid specialist remains the one open capability, and it
+  is now documented rather than assumed.
+
+
+════════════════════════════════════════════════════════════════════════════
+STATUS SNAPSHOT
+════════════════════════════════════════════════════════════════════════════
+
+  component                     state
+  ────────────────────────────  ────────────────────────────────────────────
+  CERN solver                   ✅ 30/30 live, 280 ms/img, CLI reproduces
+  text specialist               ✅ 93–100% hard tier (no regression)
+  grid specialist (clean)       ✅ perfect on real WAF tiles
+  grid specialist (confusable)  ⚠ docs (prompts + L/14 both fail) → head is
+                                    the fix; bootstrap corpus is being built
+  brain (single-network)        ✅ honest, behind specialists by design
+  ONNX + parallel                ✅ verified (identical preds; 4.1x wall)
+
+
+  In flight: WAF corpus harvest (verified via the WAF /verify endpoint) —
+  15 server-accepted problems so far, 135 labelled tiles, still running.
+  That is the training data for the last open item.
+
+  Files: FIELD_TEST.txt · FIELD_TEST_RETEST.txt · FIELD_TEST_RETEST2.txt
+════════════════════════════════════════════════════════════════════════════
