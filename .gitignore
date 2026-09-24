@@ -5,6 +5,7 @@
 # ...except these two, shipped so the repo runs out of the box
 !crnn_best.pt
 !grid_head.pt
+!cern_crnn.pt
 
 hfmodel/model.safetensors
 models/

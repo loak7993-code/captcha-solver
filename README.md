@@ -62,6 +62,43 @@ What actually made it fast (in order of impact):
 
 ---
 
+## Decisions, not descriptions
+
+`decide()` returns a **typed action** instead of a description — no prose, nothing
+to parse. This is the [Jev](https://typesafe.ai) "System One" pattern applied
+here: one non-autoregressive pass, typed output, calibrated confidence.
+
+```python
+from captcha_ai import decide
+decide("captcha.png")                              # -> type rgcyj  conf=1.00
+decide("grid.png", target="traffic light")         # -> click (162,162) (270,162) (54,270)
+```
+
+```bash
+python3 captcha_ai.py grid.png --target "traffic light" --decide
+python3 captcha_ai.py captcha.png --decide --json
+```
+
+Three actions:
+
+| action | fields | meaning |
+|---|---|---|
+| `type` | `value` | submit that string |
+| `click` | `points` (pixel centres), `cells` (row/col) | click each point |
+| `retry` | `reason`, `confidence` | confidence below `--retry-below`; request a fresh CAPTCHA |
+
+```json
+{"action":"click","confidence":1.0,"target":"traffic light",
+ "cells":[[1,1],[1,2],[2,0]],"points":[[162,162],[270,162],[54,270]],
+ "scores":{"tiles":[0.0,0.0,0.0,0.0,1.0,1.0,1.0,0.0,0.0]}}
+```
+
+`retry` is the important one: a low-confidence read is *decided against* rather
+than guessed, which is what makes the multi-attempt path reliable — refetching a
+CAPTCHA is free, a wrong submission is not.
+
+---
+
 ## One entry point
 
 Both solvers sit behind a single call that picks the right one for you:
@@ -86,6 +123,38 @@ both reads text and selects tiles — the text and grid specialists are differen
 architectures, and the local vision-language-model route is blocked (the
 image processor needs torchvision, whose C extension does not load against this
 torch build). This is one *interface* over two specialists.
+
+---
+
+## Tested against a real CAPTCHA (server-validated)
+
+A public, open-source CAPTCHA service — [CERN/captcha-api](https://github.com/CERN/captcha-api)
+at `captcha.web.cern.ch` — exposes a validation endpoint, so accuracy is checked
+by the server rather than eyeballed.
+
+| solver | result |
+|---|---|
+| the synthetic-trained text model | **0 / 40** — it cannot even express the answer |
+| [**`cern_solver.py`**](cern_solver.py) — trained on a ported renderer | **47 / 50 (94%)** validated live |
+
+The shipped model scores zero because its alphabet is 31 lowercase characters
+with no `i l o 0 1`, while CERN emits **mixed case** and digits and validates
+case-sensitively — no lowercase-only model can ever be right.
+
+The fix is the strongest lever in this whole repo: **replicate the target's own
+renderer**. CERN's generator is open source, so [`cern_gen.py`](cern_gen.py)
+ports it exactly — DejaVuSerif 36pt, per-glyph rotation −50…+50°, colourised,
+15 interference lines, JPEG — and a CRNN is trained on the 61-character
+case-sensitive alphabet. **No real images were used for training at all.**
+
+```bash
+python3 cern_gen.py                 # build the corpus from the ported renderer
+python3 cern_solver.py train 18 6000
+python3 cern_solver.py live 50      # hit the live API, server-validated
+```
+
+Full write-up, including the CTC blank-plateau trap that cost a run and the
+`can-it-overfit-16-images?` diagnostic: [`NOTES_CERN.md`](NOTES_CERN.md).
 
 ---
 
@@ -212,6 +281,7 @@ selected, scores, (rows, cols) = solve_grid("grid.png", "traffic light")
 |---|---|
 | `captcha_ai.py` | **unified entry point** — one `solve()` call / one CLI, auto-routes text vs grid |
 | `gen.py`, `gen_mixed.py` | synthetic text-CAPTCHA generators (labelled testbeds) |
+| `cern_gen.py`, `cern_solver.py` | **real-CAPTCHA** port of the CERN renderer + its 94% validated solver |
 | `crnn.py` | CRNN+CTC model, training loop, greedy decode |
 | `solve.py` | Tesseract baseline pipeline |
 | `solve_pro.py` | text solver: beam search + TTA + model soup |
