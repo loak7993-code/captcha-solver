@@ -19,13 +19,23 @@ from PIL import Image
 from clip_onnx import CLIP
 
 _CLIP = None
+_CLIP_KW = {"quantized": False}
 
 
 def _clip():
     global _CLIP
     if _CLIP is None:
-        _CLIP = CLIP()
+        _CLIP = CLIP(**_CLIP_KW)
     return _CLIP
+
+
+def set_clip_options(quantized=None):
+    """Rebuild the shared CLIP session with different options (e.g. int8).
+    int8 vision tower is ~1.8x faster; accuracy impact is small."""
+    global _CLIP, _CLIP_KW
+    if quantized is not None and bool(quantized) != _CLIP_KW["quantized"]:
+        _CLIP_KW["quantized"] = bool(quantized)
+        _CLIP = None
 
 
 # ------------------------------------------------------------------ grid split
@@ -139,16 +149,26 @@ def score_tiles_head(tiles, target, clip=None, tta=True, head_path=None):
     views = [tiles]
     if tta:
         views += [[_hflip(t) for t in tiles], [_zoom(t) for t in tiles]]
-    P = None
+    # one batched forward for every tile of every view (was: one call per tile)
+    flat = [im for v in views for im in v]
+    X = np.asarray(clip.image_embeds(flat))
+    X = (X - mean) / std
     with torch.no_grad():
-        for vt in views:
-            X = np.array([clip.image_embeds(t)[0] for t in vt])
-            X = (X - mean) / std
-            p = torch.softmax(net(torch.tensor(X, dtype=torch.float32)), 1).numpy()
-            P = p if P is None else P + p
-    P = P / len(views)
+        P = torch.softmax(net(torch.tensor(X, dtype=torch.float32)), 1).numpy()
+    P = P.reshape(len(views), len(tiles), -1).mean(axis=0)
     ti = classes.index(target)
     return P[:, ti], P.argmax(1) == ti
+
+
+def head_available(target=None):
+    """True when a trained head exists (and covers `target`, if given)."""
+    try:
+        if not os.path.exists(HEAD_PATH):
+            return False
+        _, classes, _, _ = _head()
+        return (target in classes) if target else True
+    except Exception:
+        return False
 
 
 def score_tiles(tiles, target, candidates=None, negatives=None, clip=None, tta=True):
@@ -184,11 +204,10 @@ def score_tiles(tiles, target, candidates=None, negatives=None, clip=None, tta=T
     if tta:
         views.append([_hflip(t) for t in tiles])
         views.append([_zoom(t) for t in tiles])
-    acc = None
-    for vt in views:
-        prob, _ = clip.classify(vt, prompts)
-        acc = prob if acc is None else acc + prob
-    prob = acc / len(views)
+    # one batched forward for all views, then average
+    flat = [im for v in views for im in v]
+    prob, _ = clip.classify(flat, prompts)
+    prob = prob.reshape(len(views), len(tiles), -1).mean(axis=0)
 
     tscore = prob[:, spans[0][0]:spans[0][1]].sum(axis=1)
     if candidates:
@@ -200,14 +219,16 @@ def score_tiles(tiles, target, candidates=None, negatives=None, clip=None, tta=T
 
 
 def solve_grid(path_or_img, target, rows=None, cols=None,
-               threshold=0.3, inset=3, clip=None, candidates=None, use_head=None):
+               threshold=0.3, inset=3, clip=None, candidates=None, use_head=None,
+               tta=True):
     """Returns (selected_indices, scores, (rows, cols)).
 
     selected_indices: 0-based tile indices chosen as containing `target`.
     scores: per-tile target probability (row-major).
 
     use_head: None -> auto (use the trained head when grid_head.pt exists and the
-    target is in its class list, else zero-shot); True/False to force."""
+    target is in its class list, else zero-shot); True/False to force.
+    tta: score flipped/zoomed views too (~3x the vision cost, small accuracy gain)."""
     img = Image.open(path_or_img) if isinstance(path_or_img, (str, bytes)) else path_or_img
     if rows is None or cols is None:
         rows, cols = detect_grid(img)
@@ -221,9 +242,9 @@ def solve_grid(path_or_img, target, rows=None, cols=None,
             except Exception:
                 use_head = False
     if use_head:
-        scores, wins = score_tiles_head(tiles, target, clip=clip)
+        scores, wins = score_tiles_head(tiles, target, clip=clip, tta=tta)
     else:
-        scores, wins = score_tiles(tiles, target, candidates=candidates, clip=clip)
+        scores, wins = score_tiles(tiles, target, candidates=candidates, clip=clip, tta=tta)
     sel = [i for i, s in enumerate(scores) if s >= threshold and wins[i]]
     return sel, scores, (rows, cols)
 

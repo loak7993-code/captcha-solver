@@ -1,6 +1,11 @@
-# model weights and datasets are downloaded/generated, not committed
+# large model weights and datasets are downloaded/generated, not committed
 *.pt
 *.pth
+
+# ...except these two, shipped so the repo runs out of the box
+!crnn_best.pt
+!grid_head.pt
+
 hfmodel/model.safetensors
 models/
 data/

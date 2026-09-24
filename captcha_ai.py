@@ -80,40 +80,63 @@ def _as_path(image):
     return tmp.name, tmp.name
 
 
+# --------------------------------------------------------------------------- presets
+# speed presets: what each one turns on/off
+PRESETS = {
+    # ~8 ms text / ~160 ms grid, accuracy within ~0.5 pt of balanced on our tests
+    "fast":     {"text": dict(tta=False, beam=1),
+                 "grid": dict(tta=False), "quantized": True},
+    # default: TTA + beam, fp32 vision
+    "balanced": {"text": dict(tta=True, beam=12),
+                 "grid": dict(tta=True), "quantized": False},
+    # model soup + wider beam
+    "accurate": {"text": dict(tta=True, beam=16, ensemble="soup"),
+                 "grid": dict(tta=True), "quantized": False},
+}
+
+
 # --------------------------------------------------------------------------- main API
 def solve(image, target=None, kind=None, candidates=None, threshold=0.3,
-          attempts=1, **kw):
+          speed="balanced", **kw):
     """Solve one CAPTCHA. Returns a `Result`.
 
     image       path or PIL.Image
     target      challenge label for grids ("traffic light"); ignored for text
     kind        force "text" or "grid" instead of auto-detecting
     candidates  candidate class list for discriminative grid scoring
-    attempts    grid: request a fresh image until a confident read (uses `fetch`)
+    speed       "fast" | "balanced" (default) | "accurate"
     """
     img = image if isinstance(image, Image.Image) else Image.open(image)
     kind = kind or detect_kind(img, target)
+    preset = PRESETS.get(speed, PRESETS["balanced"])
 
     if kind == "text":
         import solve_pro
         path, tmp = _as_path(img)
+        opts = {**preset["text"], **kw}
         try:
-            text, score = solve_pro.solve_pro(path, **kw)
+            text, score = solve_pro.solve_pro(path, **opts)
         finally:
             if tmp:
                 os.unlink(tmp)
         return Result(kind="text", text=text, confidence=float(score),
-                      detail={"chars": len(text)})
+                      detail={"chars": len(text), "speed": speed})
 
     if not target:
         raise ValueError("grid CAPTCHAs need a target label, e.g. target='traffic light'")
 
     import solve_grid
+    solve_grid.set_clip_options(quantized=preset["quantized"])
+    # without a trained head and without candidate classes, zero-shot "open" mode
+    # is permissive and over-selects; raise the bar in that case
+    if not solve_grid.head_available(target) and not candidates:
+        threshold = max(threshold, 0.5)
+    opts = {**preset["grid"], **kw}
     sel, scores, (rows, cols) = solve_grid.solve_grid(
-        img, target, threshold=threshold, candidates=candidates)
+        img, target, threshold=threshold, candidates=candidates, **opts)
     conf = float(max([scores[i] for i in sel], default=0.0))
     return Result(kind="grid", selected=list(sel), confidence=conf, target=target,
-                  detail={"rows": rows, "cols": cols,
+                  detail={"rows": rows, "cols": cols, "speed": speed,
                           "scores": [round(float(s), 3) for s in scores]})
 
 
@@ -126,11 +149,12 @@ def main(argv):
     ap.add_argument("--kind", choices=["text", "grid"], help="force the solver")
     ap.add_argument("--classes", nargs="*", help="candidate classes for grid scoring")
     ap.add_argument("--threshold", type=float, default=0.3)
+    ap.add_argument("--speed", choices=["fast", "balanced", "accurate"], default="balanced")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     a = ap.parse_args(argv)
 
     r = solve(a.image, target=a.target, kind=a.kind,
-              candidates=a.classes, threshold=a.threshold)
+              candidates=a.classes, threshold=a.threshold, speed=a.speed)
     print(r.to_json() if a.json else str(r))
     return 0
 

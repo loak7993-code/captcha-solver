@@ -152,20 +152,21 @@ def logp_for(path, backend, common=COMMON, tta=True):
     averaged over the TTA views when tta=True.
 
     backend: "pretrained" | "local" (default checkpoint) | "local:<ckpt path>"
-    """
+
+    All TTA views go through the network in a single batched forward (padded to
+    a common width), which is what makes the TTA path fast."""
     if isinstance(backend, str) and backend.startswith("local:"):
         kind, m = "local", _load_local(backend.split(":", 1)[1])
     else:
         kind, m = load_any(backend)
     i2c = _i2c(kind, None)
     views = TTA_VIEWS if tta else TTA_VIEWS[:1]
-    acc = None
-    for rot, scale, bright in views:
-        x = _render(path, kind, rot, scale, bright)
-        lg = F.log_softmax(m(x)[0], dim=-1)              # (T, C)
-        pr = project(lg, i2c, common)
-        acc = pr if acc is None else torch.logaddexp(acc, pr)
-    return acc - math.log(len(views))                     # mean in log space
+    xs = [_render(path, kind, rot, scale, bright) for rot, scale, bright in views]
+    W = max(x.shape[-1] for x in xs)
+    batch = torch.cat([F.pad(x, (0, W - x.shape[-1])) for x in xs], 0)   # (V,1,H,W)
+    lg = F.log_softmax(m(batch), dim=-1)                                # (V,T,C)
+    pr = torch.stack([project(lg[i], i2c, common) for i in range(lg.shape[0])])
+    return torch.logsumexp(pr, dim=0) - math.log(len(views))            # mean in log space
 
 
 def _expand(ensemble):

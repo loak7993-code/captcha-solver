@@ -13,8 +13,9 @@ import os, sys, urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 CLIP_REPO = "Xenova/clip-vit-base-patch32"
-CLIP_FILES = ["onnx/vision_model.onnx", "onnx/text_model.onnx",
-              "tokenizer.json", "preprocessor_config.json", "config.json"]
+CLIP_FILES = ["onnx/vision_model.onnx", "onnx/vision_model_quantized.onnx",
+              "onnx/text_model.onnx", "tokenizer.json",
+              "preprocessor_config.json", "config.json"]
 CLIP_DEST = os.path.join(HERE, "models", "clip")
 
 CRNN_REPO = "Graf-J/captcha-crnn-base"

@@ -48,6 +48,14 @@ def _model(backend="pretrained"):
         m.eval()
         _MODELS[backend] = ("local", m)
     else:
+        if not os.path.exists(WEIGHTS):
+            raise FileNotFoundError(
+                "No text model available.\n"
+                f"  looked for a local model at : {LOCAL_WEIGHTS}\n"
+                f"  looked for pretrained weights at: {WEIGHTS}\n"
+                "Fix with either:\n"
+                "  python3 fetch_models.py            # download the pretrained CRNN\n"
+                "  python3 crnn.py data/train 35      # or train your own")
         _MODELS[backend] = ("pretrained", load(WEIGHTS))
     return _MODELS[backend]
 

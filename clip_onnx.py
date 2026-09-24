@@ -21,17 +21,25 @@ MODEL_DIR = os.environ.get("CLIP_ONNX_DIR",
 
 
 class CLIP:
-    def __init__(self, model_dir=MODEL_DIR, threads=4):
+    def __init__(self, model_dir=MODEL_DIR, threads=None, quantized=False):
         so = ort.SessionOptions()
-        so.intra_op_num_threads = threads
+        so.intra_op_num_threads = threads or (os.cpu_count() or 4)
         so.log_severity_level = 3
-        self.vis = ort.InferenceSession(os.path.join(model_dir, "vision_model.onnx"),
+        so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+        vis_name = "vision_model.onnx"
+        if quantized:
+            for cand in ("vision_model_quantized.onnx", "vision_model_int8.onnx"):
+                if os.path.exists(os.path.join(model_dir, cand)):
+                    vis_name = cand
+                    break
+        self.vis = ort.InferenceSession(os.path.join(model_dir, vis_name),
                                         so, providers=["CPUExecutionProvider"])
         self.txt = ort.InferenceSession(os.path.join(model_dir, "text_model.onnx"),
                                         so, providers=["CPUExecutionProvider"])
         self.tok = Tokenizer.from_file(os.path.join(model_dir, "tokenizer.json"))
         self.tok.enable_truncation(77)
         self.tok.enable_padding(length=77)
+        self._text_cache = {}
         pp = json.load(open(os.path.join(model_dir, "preprocessor_config.json")))
         self.mean = np.array(pp["image_mean"], dtype=np.float32).reshape(3, 1, 1)
         self.std = np.array(pp["image_std"], dtype=np.float32).reshape(3, 1, 1)
@@ -62,9 +70,15 @@ class CLIP:
     def text_embeds(self, texts):
         if isinstance(texts, str):
             texts = [texts]
+        key = tuple(texts)
+        hit = self._text_cache.get(key)
+        if hit is not None:
+            return hit
         ids = np.array([self.tok.encode(t).ids for t in texts], dtype=np.int64)
         e = self.txt.run(None, {"input_ids": ids})[0]
-        return e / np.linalg.norm(e, axis=-1, keepdims=True)
+        e = e / np.linalg.norm(e, axis=-1, keepdims=True)
+        self._text_cache[key] = e
+        return e
 
     # ---- zero-shot
     def classify(self, imgs, prompts, template="a photo of a {}"):

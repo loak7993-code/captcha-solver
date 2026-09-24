@@ -26,6 +26,42 @@ inference time.
 
 ---
 
+## Speed
+
+Three presets, measured on this machine (8 CPU threads, no GPU):
+
+| preset | text CAPTCHA | image grid | notes |
+|---|---|---|---|
+| `fast` | **~10 ms** | **~190 ms** | greedy decode, no TTA, int8 vision |
+| `balanced` *(default)* | ~78 ms | ~570 ms | beam + TTA, fp32 vision |
+| `accurate` | ~106 ms | ~570 ms | adds the 4-model soup and a wider beam |
+
+Accuracy cost of `fast`:
+- **text: none measured** — 99.0% on the hard tier either way, 10x faster.
+- **grid: ~5 points** — 78.3% vs 83.3% exact, mostly recovered recall.
+
+```python
+from captcha_ai import solve
+solve("captcha.png", speed="fast")
+```
+
+```bash
+python3 captcha_ai.py captcha.png --speed fast
+```
+
+What actually made it fast (in order of impact):
+1. **Batched CLIP inference.** The grid head was calling CLIP once *per tile* —
+   27 separate forwards per grid. All tiles and TTA views now go through in a
+   single pass (~1.4 s → ~0.6 s before any other change).
+2. **No TTA for the fast preset.** 3 views → 1 is a straight 3x on the vision cost.
+3. **int8 vision tower** (`vision_model_quantized.onnx`) — ~1.8x on CPU.
+4. **Text: greedy + single view** — 96 ms → 8 ms, a 12x cut.
+5. **Batched text TTA** for the non-fast presets (all 7 views in one forward).
+6. **Cached text embeddings** so repeated prompt sets aren't re-encoded.
+7. **All CPU threads** given to ONNX Runtime instead of 4.
+
+---
+
 ## One entry point
 
 Both solvers sit behind a single call that picks the right one for you:
@@ -126,16 +162,16 @@ grid image → find tile boundaries → split into tiles
 
 ```bash
 pip install torch numpy pillow onnxruntime tokenizers
+python3 fetch_models.py          # CLIP ONNX for the grid solver (~700 MB)
 ```
 
-Download the pretrained models used by the convenience paths (they are not
-committed — too large):
+**Already included** so both solvers run immediately after cloning:
+- `crnn_best.pt` — the trained text model (~8 MB)
+- `grid_head.pt` — the trained grid head (~1 MB)
 
-```bash
-python3 fetch_models.py          # ~610 MB (CLIP ONNX) + ~14 MB (CRNN)
-```
-
-You can also train everything from scratch with the included scripts.
+`fetch_models.py` only needs to pull the CLIP ONNX towers (too large to commit)
+plus the optional pretrained text CRNN. Everything can also be retrained from
+scratch with the included scripts.
 
 ---
 
