@@ -81,17 +81,21 @@ def detect_grid(img, white=235, min_band=2):
     return int(rows), int(cols)
 
 
-def split_grid(img, rows, cols, inset=3):
-    """Equal split into rows*cols tiles, with an inset to skip separator borders."""
+def tile_boxes(img, rows, cols, inset=3):
+    """Pixel boxes of each tile, row-major: (x0, y0, x1, y1)."""
     w, h = img.size
     tw, th = w / cols, h / rows
-    tiles = []
+    boxes = []
     for r in range(rows):
         for c in range(cols):
-            box = (int(c * tw) + inset, int(r * th) + inset,
-                   int((c + 1) * tw) - inset, int((r + 1) * th) - inset)
-            tiles.append(img.crop(box))
-    return tiles
+            boxes.append((int(c * tw) + inset, int(r * th) + inset,
+                          int((c + 1) * tw) - inset, int((r + 1) * th) - inset))
+    return boxes
+
+
+def split_grid(img, rows, cols, inset=3):
+    """Equal split into rows*cols tiles, with an inset to skip separator borders."""
+    return [img.crop(b) for b in tile_boxes(img, rows, cols, inset)]
 
 
 # ------------------------------------------------------------------ scoring
@@ -111,7 +115,9 @@ def _zoom(im, frac=0.88):
     return im.crop((dw, dh, w - dw, h - dh)).resize((w, h), Image.BICUBIC)
 
 
-def _prompts_for(c):
+def _prompts_for(c, override=None):
+    if override and c in override:
+        return list(override[c])
     return [f"a photo of a {c}", f"a {c}", f"a close-up photo of a {c}",
             f"a picture of a {c}", f"a cropped photo of a {c}"]
 
@@ -171,7 +177,8 @@ def head_available(target=None):
         return False
 
 
-def score_tiles(tiles, target, candidates=None, negatives=None, clip=None, tta=True):
+def score_tiles(tiles, target, candidates=None, negatives=None, clip=None, tta=True,
+                prompt_override=None):
     """Zero-shot score per tile for `target`.
 
     candidates given -> discriminative mode: softmax over the target plus every
@@ -184,21 +191,26 @@ def score_tiles(tiles, target, candidates=None, negatives=None, clip=None, tta=T
     flipped and slightly zoomed views - cheap, and it measurably steadies the
     per-tile decision.
 
+    prompt_override: {class: [prompt, ...]} to replace the default templates for
+    specific classes. This is how you disambiguate confusable pairs
+    (bucket vs pot) without retraining anything.
+
     Returns (target_scores, wins) where `wins[i]` is True when the target is the
     highest-scoring class for that tile (always True in non-discriminative mode).
     """
     clip = clip or _clip()
     if candidates:
         classes = [target] + [c for c in candidates if c != target]
-        prompts, spans = [], []
+        plist, spans = [], []
         for c in classes:
-            vs = _prompts_for(c)
-            spans.append((len(prompts), len(prompts) + len(vs)))
-            prompts += vs
-        prompts += list(negatives or [])
+            vs = _prompts_for(c, prompt_override)
+            spans.append((len(plist), len(plist) + len(vs)))
+            plist += vs
+        plist += list(negatives or [])
     else:
-        prompts = _prompts_for(target) + list(negatives or DEFAULT_NEGATIVES)
-        spans = [(0, len(_prompts_for(target)))]
+        vs = _prompts_for(target, prompt_override)
+        plist = vs + list(negatives or DEFAULT_NEGATIVES)
+        spans = [(0, len(vs))]
 
     views = [tiles]
     if tta:
@@ -206,7 +218,7 @@ def score_tiles(tiles, target, candidates=None, negatives=None, clip=None, tta=T
         views.append([_zoom(t) for t in tiles])
     # one batched forward for all views, then average
     flat = [im for v in views for im in v]
-    prob, _ = clip.classify(flat, prompts)
+    prob, _ = clip.classify(flat, plist)
     prob = prob.reshape(len(views), len(tiles), -1).mean(axis=0)
 
     tscore = prob[:, spans[0][0]:spans[0][1]].sum(axis=1)
@@ -220,7 +232,7 @@ def score_tiles(tiles, target, candidates=None, negatives=None, clip=None, tta=T
 
 def solve_grid(path_or_img, target, rows=None, cols=None,
                threshold=0.3, inset=3, clip=None, candidates=None, use_head=None,
-               tta=True):
+               tta=True, prompt_override=None):
     """Returns (selected_indices, scores, (rows, cols)).
 
     selected_indices: 0-based tile indices chosen as containing `target`.
@@ -244,7 +256,8 @@ def solve_grid(path_or_img, target, rows=None, cols=None,
     if use_head:
         scores, wins = score_tiles_head(tiles, target, clip=clip, tta=tta)
     else:
-        scores, wins = score_tiles(tiles, target, candidates=candidates, clip=clip, tta=tta)
+        scores, wins = score_tiles(tiles, target, candidates=candidates, clip=clip,
+                                   tta=tta, prompt_override=prompt_override)
     sel = [i for i, s in enumerate(scores) if s >= threshold and wins[i]]
     return sel, scores, (rows, cols)
 

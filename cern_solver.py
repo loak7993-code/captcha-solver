@@ -195,8 +195,12 @@ def load(path=CKPT):
     return m
 
 
-def live(n=50, tta=False, beam=0):
-    """Solve real CAPTCHAs from the live CERN API and validate the answers."""
+def live(n=50, tta=True, beam=8):
+    """Solve real CAPTCHAs from the live CERN API and validate the answers.
+
+    Defaults to the strong decoder (TTA + CTC beam search): it costs ~+33 ms/img
+    over greedy and is worth several points, so the default should be the number
+    the README quotes. Pass tta=False, beam=0 for the fast path."""
     import base64, urllib.request, urllib.error, http.cookiejar
     model = load()
     ok = 0; t0 = time.time()
@@ -235,7 +239,14 @@ if __name__ == "__main__":
         print(f"val beam8       : {evaluate(m, 'data/cern_val', lab, beam=8)*100:.1f}%")
         print(f"val beam8 + TTA : {evaluate(m, 'data/cern_val', lab, tta=True, beam=8)*100:.1f}%")
     elif cmd == "live":
-        n = int(sys.argv[2]) if len(sys.argv) > 2 else 50
-        tta = len(sys.argv) > 3 and sys.argv[3] == "tta"
-        beam = int(sys.argv[4]) if len(sys.argv) > 4 else (8 if tta else 0)
-        live(n, tta=tta, beam=beam)
+        # strong decoder is the default; `--greedy` opts into the fast path
+        args = sys.argv[2:]
+        use_greedy = "--greedy" in args
+        args = [a for a in args if a != "--greedy"]
+        n = int(args[0]) if args else 50
+        if use_greedy:
+            live(n, tta=False, beam=0)
+        else:
+            tta = "greedy" not in args
+            beam = int(args[1]) if len(args) > 1 else 8
+            live(n, tta=tta, beam=beam)

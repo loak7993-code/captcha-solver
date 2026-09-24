@@ -133,9 +133,15 @@ Both solvers sit behind a single call that picks the right one for you:
 
 ```python
 from captcha_ai import solve
-solve("captcha.png")                          # auto-detects -> text
-solve("grid.png", target="traffic light")     # grid
+r = solve("captcha.png")                       # auto-detects -> text
+print(r.text)                                  # text CAPTCHAs: the string is r.text
+r = solve("grid.png", target="traffic light")
+print(r.selected)                              # grid CAPTCHAs: tile indices in r.selected
 ```
+
+> Field note: text answer is `Result.text`, grid answer is `Result.selected`.
+> There is no `Result.value` — that name is only used on the `Decision` object
+> returned by `decide()`.
 
 ```bash
 python3 captcha_ai.py captcha.png
@@ -180,6 +186,15 @@ python3 cern_gen.py                 # build the corpus from the ported renderer
 python3 cern_solver.py train 18 6000
 python3 cern_solver.py live 50      # hit the live API, server-validated
 ```
+
+`live` defaults to the **strong decoder (TTA + CTC beam-8)** — it costs ~+33 ms/img
+over greedy and is worth several points, so the documented command reproduces the
+headline number:
+
+| decoder | live result |
+|---|---|
+| greedy (`live N --greedy`) | ~93% |
+| **TTA + beam-8 (`live N`, default)** | **~100%** |
 
 Full write-up, including the CTC blank-plateau trap that cost a run and the
 `can-it-overfit-16-images?` diagnostic: [`NOTES_CERN.md`](NOTES_CERN.md).
