@@ -26,6 +26,33 @@ inference time.
 
 ---
 
+## One entry point
+
+Both solvers sit behind a single call that picks the right one for you:
+
+```python
+from captcha_ai import solve
+solve("captcha.png")                          # auto-detects -> text
+solve("grid.png", target="traffic light")     # grid
+```
+
+```bash
+python3 captcha_ai.py captcha.png
+python3 captcha_ai.py grid.png --target "traffic light"
+```
+
+Routing: a `target` prompt means grid; otherwise a near-square image with
+straight near-white separator bands between tiles is treated as a grid, and
+anything else as text. Both paths return the same `Result` object.
+
+**What this is not:** a single neural network. There is no one model here that
+both reads text and selects tiles — the text and grid specialists are different
+architectures, and the local vision-language-model route is blocked (the
+image processor needs torchvision, whose C extension does not load against this
+torch build). This is one *interface* over two specialists.
+
+---
+
 ## Results
 
 <p align="center">
@@ -147,6 +174,7 @@ selected, scores, (rows, cols) = solve_grid("grid.png", "traffic light")
 
 | File | Purpose |
 |---|---|
+| `captcha_ai.py` | **unified entry point** — one `solve()` call / one CLI, auto-routes text vs grid |
 | `gen.py`, `gen_mixed.py` | synthetic text-CAPTCHA generators (labelled testbeds) |
 | `crnn.py` | CRNN+CTC model, training loop, greedy decode |
 | `solve.py` | Tesseract baseline pipeline |

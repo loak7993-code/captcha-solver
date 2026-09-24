@@ -29,9 +29,12 @@ def _clip():
 
 
 # ------------------------------------------------------------------ grid split
-def detect_grid(img, white=235, min_band=2):
-    """Find internal separator lines (near-white horizontal/vertical bands) and
-    return (rows, cols). Falls back to (3, 3) when none are found."""
+def separators(img, white=235, min_band=2):
+    """Internal near-white separator bands: (row_bands, col_bands).
+
+    A row is a separator when almost every pixel in it is near-white, and a
+    column likewise. Only bands strictly inside the image count (the outer
+    border is not a separator)."""
     a = np.asarray(img.convert("L"))
     h, w = a.shape
 
@@ -50,11 +53,19 @@ def detect_grid(img, white=235, min_band=2):
             groups.append((start, idx[-1]))
         return groups
 
-    # a row is a separator if almost every pixel in it is near-white
-    row_sep = bands((a > white).mean(axis=1) * 255)
-    col_sep = bands((a > white).mean(axis=0) * 255)
-    rows = len([b for b in row_sep if 0 < b[0] and b[1] < h - 1]) + 1
-    cols = len([b for b in col_sep if 0 < b[0] and b[1] < w - 1]) + 1
+    row_sep = [b for b in bands((a > white).mean(axis=1) * 255) if 0 < b[0] and b[1] < h - 1]
+    col_sep = [b for b in bands((a > white).mean(axis=0) * 255) if 0 < b[0] and b[1] < w - 1]
+    return row_sep, col_sep
+
+
+def detect_grid(img, white=235, min_band=2):
+    """Find internal separator lines and return (rows, cols).
+    Falls back to (3, 3) when none are found."""
+    a = np.asarray(img.convert("L"))
+    h, w = a.shape
+    row_sep, col_sep = separators(img, white, min_band)
+    rows = len(row_sep) + 1
+    cols = len(col_sep) + 1
     if rows < 2 or cols < 2:
         return 3, 3
     return int(rows), int(cols)
@@ -100,17 +111,22 @@ HEAD_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "grid_head.
 
 
 def _head(path=None):
-    """Load the trained MLP head on CLIP features (grid_head.pt)."""
+    """Load the trained MLP head on CLIP features (grid_head.pt).
+
+    Loaded with weights_only=True: the file holds only tensors and plain
+    Python lists, so no unpickling of arbitrary objects is needed."""
     global _HEAD
     if _HEAD is None:
         import torch
         import torch.nn as nn
-        d = torch.load(path or HEAD_PATH, map_location="cpu")
+        d = torch.load(path or HEAD_PATH, map_location="cpu", weights_only=True)
         C = len(d["classes"])
         net = nn.Sequential(nn.Linear(512, 512), nn.ReLU(), nn.Dropout(0.2),
                             nn.Linear(512, C))
         net.load_state_dict(d["state_dict"]); net.eval()
-        _HEAD = (net, d["classes"], d["mean"], d["std"])
+        mean = np.asarray(d["mean"], dtype=np.float32)
+        std = np.asarray(d["std"], dtype=np.float32)
+        _HEAD = (net, d["classes"], mean, std)
     return _HEAD
 
 

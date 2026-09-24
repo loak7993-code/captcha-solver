@@ -135,5 +135,6 @@ if __name__ == "__main__":
     show("MLP head", score(grids, classes, head_fn, ths), len(grids), ths)
 
     torch.save({"state_dict": head.state_dict(), "classes": classes,
-                "mean": X.mean(0), "std": X.std(0) + 1e-6}, "grid_head.pt")
+                "mean": X.mean(0).tolist(), "std": (X.std(0) + 1e-6).tolist()},
+               "grid_head.pt")
     print("\nsaved grid_head.pt (head weights + class list)", flush=True)
