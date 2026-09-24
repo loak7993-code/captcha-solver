@@ -23,3 +23,7 @@ venv/
 # logs
 *.log
 campaign.log
+
+# stray report/notes .txt files are local artefacts, not project files
+*.txt
+!requirements.txt
